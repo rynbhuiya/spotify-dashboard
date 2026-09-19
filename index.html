@@ -87,18 +87,6 @@
     color: var(--muted);
     margin-bottom: 0.5rem;
   }
-  #clientIdInput {
-    width: 100%;
-    background: var(--ink);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    color: var(--text);
-    font-family: var(--mono);
-    font-size: 0.9rem;
-    padding: 0.75rem 1rem;
-    margin-bottom: 1.25rem;
-  }
-  #clientIdInput:focus { border-color: var(--green); outline: none; }
   .btn-primary {
     width: 100%;
     background: var(--green);
@@ -464,15 +452,8 @@
 <div id="setup">
   <div class="setup-card">
     <span class="eyebrow">Rotation · Spotify dashboard</span>
-    <h1>Connect your Spotify</h1>
-    <p>This app runs entirely in your browser. Your listening data goes nowhere except between you and Spotify. One-time setup:</p>
-    <ol>
-      <li>Create a free app at <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard</a></li>
-      <li>In the app's settings, add this exact Redirect URI:<br><code id="redirectUriDisplay"></code></li>
-      <li>Copy the app's <strong>Client ID</strong> and paste it below.</li>
-    </ol>
-    <label class="field-label" for="clientIdInput">Spotify Client ID</label>
-    <input id="clientIdInput" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. 5f2b1c9e4a…" />
+    <h1>Your listening, on rotation</h1>
+    <p>See your top artists and tracks, your recent plays, and what's on rotation — pulled straight from your Spotify account. Your data stays between you and Spotify; nothing is stored on a server.</p>
     <button class="btn-primary" id="loginBtn">Log in with Spotify</button>
     <p id="setupError"></p>
   </div>
@@ -641,6 +622,8 @@
    Auth: OAuth 2.0 Authorization Code with PKCE (client-side)
    ========================================================= */
 
+// This app's own Spotify Client ID (public — safe to ship with the PKCE flow).
+const CLIENT_ID = '66e0a8f3197e48a6a437f64629521a00';
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 const SCOPES = 'user-top-read user-read-recently-played user-read-playback-state user-library-read';
 const AUTH_URL = 'https://accounts.spotify.com/authorize';
@@ -665,8 +648,6 @@ const state = {
   np: { duration: 0, progress: 0, at: 0, playing: false },
 };
 
-document.getElementById('redirectUriDisplay').textContent = REDIRECT_URI;
-
 /* ---------- PKCE helpers ---------- */
 function randomString(len) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -681,16 +662,11 @@ async function sha256base64url(str) {
 
 /* ---------- Auth flow ---------- */
 async function startLogin() {
-  const clientId = document.getElementById('clientIdInput').value.trim();
-  if (!/^[0-9a-f]{32}$/i.test(clientId)) {
-    return showSetupError('That doesn\'t look like a Spotify Client ID (32 hex characters). Copy it from your app in the developer dashboard.');
-  }
-  localStorage.setItem('spotify_client_id', clientId);
   const verifier = randomString(64);
   localStorage.setItem('pkce_verifier', verifier);
   const challenge = await sha256base64url(verifier);
   const params = new URLSearchParams({
-    client_id: clientId,
+    client_id: CLIENT_ID,
     response_type: 'code',
     redirect_uri: REDIRECT_URI,
     scope: SCOPES,
@@ -708,7 +684,7 @@ async function exchangeCode(code) {
       grant_type: 'authorization_code',
       code,
       redirect_uri: REDIRECT_URI,
-      client_id: localStorage.getItem('spotify_client_id'),
+      client_id: CLIENT_ID,
       code_verifier: localStorage.getItem('pkce_verifier'),
     }),
   });
@@ -1205,15 +1181,13 @@ async function refresh() {
 
 /* ---------- Boot ---------- */
 async function boot() {
-  const savedId = localStorage.getItem('spotify_client_id');
-  if (savedId) document.getElementById('clientIdInput').value = savedId;
   document.getElementById('loginBtn').addEventListener('click', startLogin);
   document.getElementById('logoutBtn').addEventListener('click', logout);
 
   // Returning from Spotify with an auth code?
   const params = new URLSearchParams(window.location.search);
   if (params.get('error')) {
-    showSetupError('Spotify said: ' + params.get('error') + '. Check that the Redirect URI above is added to your app settings exactly as shown.');
+    showSetupError('Spotify said: ' + params.get('error') + '. If this keeps happening, the account may not be authorized for this app yet.');
     history.replaceState({}, '', REDIRECT_URI);
   } else if (params.get('code')) {
     try {
