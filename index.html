@@ -187,6 +187,22 @@
     <p class="status" id="genreStatus"></p>
   </section>
 
+  <!-- 09 · Obscurity -->
+  <section class="panel" id="obscurityPanel">
+    <div class="panel-head">
+      <span class="eyebrow">09 · Obscurity</span>
+      <h2>How far off the beaten path you roam</h2>
+      <p>Scored from Spotify's popularity ratings for your top tracks in the selected window — the higher the number, the more underground your taste.</p>
+    </div>
+    <div class="obscurity-hero">
+      <div class="obscurity-score" id="obscurityScore">—</div>
+      <div class="obscurity-score-label">the higher, the more underground</div>
+      <div class="bar-track obscurity-meter"><div class="bar-fill" id="obscurityMeter" style="width:0%"></div></div>
+    </div>
+    <div class="tiles" id="obscurityTiles"></div>
+    <p class="status" id="obscurityStatus"></p>
+  </section>
+
   <footer>Built with the Spotify Web API · Data stays in your browser · Not affiliated with Spotify</footer>
 </div>
 
@@ -753,6 +769,8 @@ async function refresh() {
   }
 
   try { renderGenres(await getTop('artists', state.range)); } catch (e) { document.getElementById('genreStatus').textContent = apiErrorMessage(e); }
+
+  try { renderObscurity(await getTop('tracks', state.range)); } catch (e) { document.getElementById('obscurityStatus').textContent = apiErrorMessage(e); }
 }
 
 /* ---------- 08 · Genres ---------- */
@@ -783,6 +801,40 @@ function renderGenres(artists) {
       <span class="bar-label" title="${escapeHtml(genre)}">${escapeHtml(genre)}</span>
       <div class="bar-track"><div class="bar-fill" style="width:${Math.max(n / max * 100, 2)}%"></div></div>
       <span class="bar-count">${n} artist${n === 1 ? '' : 's'} · ${Math.round(n / total * 100)}%</span>
+    </div>`).join('');
+}
+
+/* ---------- 09 · Obscurity ---------- */
+function renderObscurity(tracks) {
+  const scoreEl = document.getElementById('obscurityScore');
+  const meterEl = document.getElementById('obscurityMeter');
+  const tilesEl = document.getElementById('obscurityTiles');
+  const status = document.getElementById('obscurityStatus');
+  const withPop = (tracks || []).filter(t => t && typeof t.popularity === 'number');
+  if (!withPop.length) {
+    scoreEl.textContent = '—';
+    meterEl.style.width = '0%';
+    tilesEl.innerHTML = '';
+    status.textContent = 'No popularity data for this window.';
+    return;
+  }
+  status.textContent = '';
+  const meanPop = withPop.reduce((s, t) => s + t.popularity, 0) / withPop.length;
+  const score = Math.round(100 - meanPop);
+  scoreEl.textContent = score;
+  meterEl.style.width = Math.max(Math.min(score, 100), 0) + '%';
+  const mostObscure = withPop.reduce((a, b) => (b.popularity < a.popularity ? b : a));
+  const mostMainstream = withPop.reduce((a, b) => (b.popularity > a.popularity ? b : a));
+  const tiles = [
+    { label: 'Average track popularity', value: Math.round(meanPop) + ' / 100', sub: `across your top ${withPop.length} tracks` },
+    { label: 'Your most obscure top track', value: mostObscure.popularity + ' / 100', sub: mostObscure.name || '' },
+    { label: 'Your most mainstream top track', value: mostMainstream.popularity + ' / 100', sub: mostMainstream.name || '' },
+  ];
+  tilesEl.innerHTML = tiles.map(t => `
+    <div class="tile">
+      <div class="tile-label">${escapeHtml(t.label)}</div>
+      <div class="tile-value">${escapeHtml(t.value)}</div>
+      <div class="tile-sub" title="${escapeHtml(t.sub)}">${escapeHtml(t.sub)}</div>
     </div>`).join('');
 }
 
