@@ -187,6 +187,40 @@
     <p class="status" id="genreStatus"></p>
   </section>
 
+  <!-- 09 · Obscurity -->
+  <section class="panel" id="obscurityPanel">
+    <div class="panel-head">
+      <span class="eyebrow">09 · Obscurity</span>
+      <h2>How far off the beaten path you roam</h2>
+      <p>Scored from Spotify's popularity ratings for your top tracks in the selected window — the higher the number, the more underground your taste.</p>
+    </div>
+    <div class="obscurity-hero">
+      <div class="obscurity-score" id="obscurityScore">—</div>
+      <div class="obscurity-score-label">the higher, the more underground</div>
+      <div class="bar-track obscurity-meter"><div class="bar-fill" id="obscurityMeter" style="width:0%"></div></div>
+    </div>
+    <div class="tiles" id="obscurityTiles"></div>
+    <p class="status" id="obscurityStatus"></p>
+  </section>
+
+  <!-- 10 · Share -->
+  <section class="panel" id="sharePanel">
+    <div class="panel-head">
+      <span class="eyebrow">10 · Share</span>
+      <h2>Your rotation, wrapped</h2>
+      <p>A shareable snapshot of what you're spinning this window — your headline artist, track and genre. Download it as an image and post it anywhere.</p>
+    </div>
+    <div class="share-layout">
+      <div class="share-card" id="shareCard"></div>
+      <div class="share-actions">
+        <button class="btn-primary share-download" id="shareDownloadBtn" type="button" disabled>Download PNG</button>
+        <p class="note" id="shareNote">The exported image is text-based (no album art), so it saves cleanly at story size — 1080 × 1350.</p>
+      </div>
+    </div>
+    <canvas id="shareCanvas" width="1080" height="1350" class="hidden" aria-hidden="true"></canvas>
+    <p class="status" id="shareStatus"></p>
+  </section>
+
   <footer>Built with the Spotify Web API · Data stays in your browser · Not affiliated with Spotify</footer>
 </div>
 
@@ -753,6 +787,10 @@ async function refresh() {
   }
 
   try { renderGenres(await getTop('artists', state.range)); } catch (e) { document.getElementById('genreStatus').textContent = apiErrorMessage(e); }
+
+  try { renderObscurity(await getTop('tracks', state.range)); } catch (e) { document.getElementById('obscurityStatus').textContent = apiErrorMessage(e); }
+
+  renderShareCard(state.range);
 }
 
 /* ---------- 08 · Genres ---------- */
@@ -784,6 +822,316 @@ function renderGenres(artists) {
       <div class="bar-track"><div class="bar-fill" style="width:${Math.max(n / max * 100, 2)}%"></div></div>
       <span class="bar-count">${n} artist${n === 1 ? '' : 's'} · ${Math.round(n / total * 100)}%</span>
     </div>`).join('');
+}
+
+/* ---------- 09 · Obscurity ---------- */
+function renderObscurity(tracks) {
+  const scoreEl = document.getElementById('obscurityScore');
+  const meterEl = document.getElementById('obscurityMeter');
+  const tilesEl = document.getElementById('obscurityTiles');
+  const status = document.getElementById('obscurityStatus');
+  const withPop = (tracks || []).filter(t => t && typeof t.popularity === 'number');
+  if (!withPop.length) {
+    scoreEl.textContent = '—';
+    meterEl.style.width = '0%';
+    tilesEl.innerHTML = '';
+    status.textContent = 'No popularity data for this window.';
+    return;
+  }
+  status.textContent = '';
+  const meanPop = withPop.reduce((s, t) => s + t.popularity, 0) / withPop.length;
+  const score = Math.round(100 - meanPop);
+  scoreEl.textContent = score;
+  meterEl.style.width = Math.max(Math.min(score, 100), 0) + '%';
+  const mostObscure = withPop.reduce((a, b) => (b.popularity < a.popularity ? b : a));
+  const mostMainstream = withPop.reduce((a, b) => (b.popularity > a.popularity ? b : a));
+  const tiles = [
+    { label: 'Average track popularity', value: Math.round(meanPop) + ' / 100', sub: `across your top ${withPop.length} tracks` },
+    { label: 'Your most obscure top track', value: mostObscure.popularity + ' / 100', sub: mostObscure.name || '' },
+    { label: 'Your most mainstream top track', value: mostMainstream.popularity + ' / 100', sub: mostMainstream.name || '' },
+  ];
+  tilesEl.innerHTML = tiles.map(t => `
+    <div class="tile">
+      <div class="tile-label">${escapeHtml(t.label)}</div>
+      <div class="tile-value">${escapeHtml(t.value)}</div>
+      <div class="tile-sub" title="${escapeHtml(t.sub)}">${escapeHtml(t.sub)}</div>
+    </div>`).join('');
+}
+
+/* ---------- 10 · Share (Wrapped-style card) ---------- */
+const SHARE_WINDOW_TITLE = { short_term: 'Last 4 weeks', medium_term: 'Last 6 months', long_term: 'All time' };
+let shareData = null;      // derived summary for the current window, or null
+let shareWired = false;    // download button listener attached once
+
+function shareTitleCase(s) {
+  return String(s || '').replace(/\b[a-z]/g, c => c.toUpperCase());
+}
+function shareObscurityDesc(o) {
+  if (o >= 70) return 'deep cuts';
+  if (o >= 45) return 'off the beaten path';
+  if (o >= 25) return 'balanced taste';
+  return 'chart-friendly';
+}
+
+/** Build (or refresh) the shareable summary card for a range. Never throws. */
+async function renderShareCard(range) {
+  const card = document.getElementById('shareCard');
+  const status = document.getElementById('shareStatus');
+  const btn = document.getElementById('shareDownloadBtn');
+  if (!card || !status || !btn) return;
+  status.textContent = '';
+  card.innerHTML = '';
+  btn.disabled = true;
+  shareData = null;
+
+  try {
+    const [artists, tracks] = await Promise.all([
+      getTop('artists', range),
+      getTop('tracks', range),
+    ]);
+    const hasArtists = Array.isArray(artists) && artists.length;
+    const hasTracks = Array.isArray(tracks) && tracks.length;
+    if (!hasArtists && !hasTracks) {
+      status.textContent = 'No listening data for this window yet.';
+      return;
+    }
+
+    const topArtist = hasArtists ? artists[0] : null;
+    const topTrack = hasTracks ? tracks[0] : null;
+
+    // Top genre: most frequent across top artists' genres.
+    const genreCounts = new Map();
+    (artists || []).forEach(a => (a && a.genres || []).forEach(g => {
+      if (g) genreCounts.set(g, (genreCounts.get(g) || 0) + 1);
+    }));
+    let topGenre = '';
+    genreCounts.forEach((c, g) => {
+      if (!topGenre || c > genreCounts.get(topGenre)) topGenre = g;
+    });
+
+    // Headline stat: obscurity = 100 - average track popularity.
+    const pops = (tracks || []).map(t => t && t.popularity).filter(p => typeof p === 'number');
+    let obscurity = null, avgPop = null;
+    if (pops.length) {
+      const meanPop = pops.reduce((s, p) => s + p, 0) / pops.length;
+      avgPop = Math.round(meanPop);
+      // Round after subtracting (matching the Obscurity panel) so the two never disagree.
+      obscurity = Math.round(100 - meanPop);
+    }
+
+    const trackArtists = topTrack
+      ? (topTrack.artists || []).map(a => a && a.name).filter(Boolean).join(', ')
+      : '';
+
+    const rows = [
+      { k: 'Top artist', v: (topArtist && topArtist.name) || '—' },
+      { k: 'Top track', v: (topTrack && topTrack.name) || '—', sub: trackArtists },
+      { k: 'Top genre', v: topGenre ? shareTitleCase(topGenre) : '—' },
+    ];
+    if (obscurity != null) {
+      rows.push({
+        k: 'Obscurity score',
+        v: obscurity + '/100',
+        sub: shareObscurityDesc(obscurity) + ' · avg popularity ' + avgPop,
+      });
+    }
+
+    shareData = {
+      rangeLabel: RANGE_LABELS[range] || 'share',
+      windowTitle: SHARE_WINDOW_TITLE[range] || (RANGE_LABELS[range] || ''),
+      rows,
+    };
+
+    // On-page card (album art allowed here — but never drawn to the canvas).
+    const artUrl = topArtist ? smallestImage(topArtist.images) : '';
+    card.innerHTML = `
+      <div class="share-card-inner">
+        <div class="share-card-top">
+          <span class="share-brand">ROTATION</span>
+          <span class="share-window">${escapeHtml(shareData.windowTitle)}</span>
+        </div>
+        ${artUrl ? `<img class="share-art" src="${escapeHtml(artUrl)}" alt="" referrerpolicy="no-referrer">` : ''}
+        <div class="share-rows">
+          ${rows.map(r => `
+            <div class="share-row">
+              <div class="share-row-k">${escapeHtml(r.k)}</div>
+              <div class="share-row-v">${escapeHtml(r.v)}</div>
+              ${r.sub ? `<div class="share-row-sub">${escapeHtml(r.sub)}</div>` : ''}
+            </div>`).join('')}
+        </div>
+        <div class="share-foot">made with the spotify web api</div>
+      </div>`;
+
+    btn.disabled = false;
+    if (!shareWired) {
+      btn.addEventListener('click', downloadShareCard);
+      shareWired = true;
+    }
+  } catch (err) {
+    card.innerHTML = '';
+    btn.disabled = true;
+    shareData = null;
+    status.textContent = apiErrorMessage(err);
+  }
+}
+
+/* Canvas helpers */
+function shareRoundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); return; }
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function shareSetSpacing(ctx, px) {
+  try { ctx.letterSpacing = px + 'px'; } catch (e) { /* not supported — ignore */ }
+}
+function shareFitLine(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let t = String(text);
+  while (t.length > 1 && ctx.measureText(t + '…').width > maxWidth) t = t.slice(0, -1);
+  return t + '…';
+}
+function shareWrapText(ctx, text, maxWidth, maxLines) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  if (!words.length) return [''];
+  const lines = [];
+  let cur = '';
+  for (let i = 0; i < words.length; i++) {
+    const test = cur ? cur + ' ' + words[i] : words[i];
+    if (ctx.measureText(test).width <= maxWidth || !cur) {
+      cur = test;
+    } else {
+      lines.push(cur);
+      cur = words[i];
+      if (lines.length === maxLines - 1) {
+        for (i++; i < words.length; i++) cur += ' ' + words[i];
+        break;
+      }
+    }
+  }
+  lines.push(cur);
+  const last = lines.length - 1;
+  lines[last] = shareFitLine(ctx, lines[last], maxWidth);
+  return lines.slice(0, maxLines);
+}
+
+/** Paint the current shareData onto the export canvas (text/shape only — no remote images). */
+function drawShareCanvas() {
+  const canvas = document.getElementById('shareCanvas');
+  if (!canvas || !shareData) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const INK = '#0a0e0c', SURFACE = '#182019', LINE = '#24302a',
+        GREEN = '#1ed760', TEXT = '#e8efe9', MUTED = '#7e8c84';
+  const disp = "'Unbounded', 'Space Grotesk', sans-serif";
+  const mono = "'Space Mono', monospace";
+  const body = "'Space Grotesk', sans-serif";
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = INK;
+  ctx.fillRect(0, 0, W, H);
+
+  // Card surface
+  const m = 48;
+  shareRoundRect(ctx, m, m, W - m * 2, H - m * 2, 44);
+  ctx.fillStyle = SURFACE;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = LINE;
+  ctx.stroke();
+
+  // Green accent tab
+  shareRoundRect(ctx, m + 60, m, 120, 12, 6);
+  ctx.fillStyle = GREEN;
+  ctx.fill();
+
+  const padX = 108;
+  const maxW = W - padX * 2;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  let y = 190;
+
+  // Brand
+  ctx.fillStyle = GREEN;
+  ctx.font = '700 40px ' + mono;
+  shareSetSpacing(ctx, 8);
+  ctx.fillText('ROTATION', padX, y);
+  shareSetSpacing(ctx, 0);
+
+  // Window headline
+  y += 96;
+  ctx.fillStyle = TEXT;
+  ctx.font = '600 68px ' + disp;
+  shareWrapText(ctx, shareData.windowTitle || 'Wrapped', maxW, 1)
+    .forEach(l => { ctx.fillText(l, padX, y); });
+
+  // Divider
+  y += 46;
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(padX, y);
+  ctx.lineTo(W - padX, y);
+  ctx.stroke();
+  y += 78;
+
+  // Rows
+  shareData.rows.forEach(row => {
+    ctx.fillStyle = GREEN;
+    ctx.font = '700 26px ' + mono;
+    shareSetSpacing(ctx, 4);
+    ctx.fillText(String(row.k).toUpperCase(), padX, y);
+    shareSetSpacing(ctx, 0);
+    y += 56;
+
+    ctx.fillStyle = TEXT;
+    ctx.font = '600 56px ' + disp;
+    shareWrapText(ctx, row.v, maxW, 2).forEach(l => { ctx.fillText(l, padX, y); y += 64; });
+
+    if (row.sub) {
+      ctx.fillStyle = MUTED;
+      ctx.font = '400 30px ' + body;
+      shareWrapText(ctx, row.sub, maxW, 1).forEach(l => { ctx.fillText(l, padX, y); y += 40; });
+    }
+    y += 40;
+  });
+
+  // Footer
+  ctx.fillStyle = MUTED;
+  ctx.font = '400 26px ' + mono;
+  shareSetSpacing(ctx, 2);
+  ctx.fillText('made with the spotify web api', padX, H - 96);
+  shareSetSpacing(ctx, 0);
+}
+
+/** Export the card as a PNG via canvas.toBlob + a temporary download link. */
+async function downloadShareCard() {
+  if (!shareData) return;
+  const status = document.getElementById('shareStatus');
+  try {
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready; } catch (e) { /* draw with fallback fonts */ }
+    }
+    drawShareCanvas();
+    const canvas = document.getElementById('shareCanvas');
+    canvas.toBlob(blob => {
+      if (!blob) { status.textContent = 'Couldn\'t generate the image — try again.'; return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'rotation-' + (shareData.rangeLabel || 'share') + '.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, 'image/png');
+  } catch (err) {
+    status.textContent = 'Couldn\'t generate the image: ' + err.message;
+  }
 }
 
 /* ---------- Boot ---------- */
