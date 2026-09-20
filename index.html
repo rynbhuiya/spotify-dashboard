@@ -176,6 +176,17 @@
     <p class="status" id="libStatus"></p>
   </section>
 
+  <!-- 08 · Genres -->
+  <section class="panel" id="genrePanel">
+    <div class="panel-head">
+      <span class="eyebrow">08 · Genres</span>
+      <h2>The genres you gravitate to</h2>
+      <p>The genre tags Spotify attaches to your top artists, counted up across the selected window. Your most-tagged sounds rise to the top.</p>
+    </div>
+    <div class="bars genre-bars" id="genreBars"></div>
+    <p class="status" id="genreStatus"></p>
+  </section>
+
   <footer>Built with the Spotify Web API · Data stays in your browser · Not affiliated with Spotify</footer>
 </div>
 
@@ -740,6 +751,39 @@ async function refresh() {
     document.getElementById('statsStatus').textContent = apiErrorMessage(err);
     document.getElementById('decadeStatus').textContent = apiErrorMessage(err);
   }
+
+  try { renderGenres(await getTop('artists', state.range)); } catch (e) { document.getElementById('genreStatus').textContent = apiErrorMessage(e); }
+}
+
+/* ---------- 08 · Genres ---------- */
+function renderGenres(artists) {
+  const container = document.getElementById('genreBars');
+  const status = document.getElementById('genreStatus');
+  const counts = new Map();
+  (artists || []).forEach(a => {
+    (a?.genres || []).forEach(g => {
+      const name = (g || '').trim();
+      if (!name) return;
+      counts.set(name, (counts.get(name) || 0) + 1);
+    });
+  });
+  if (!counts.size) {
+    container.innerHTML = '';
+    status.textContent = 'Spotify returned no genre tags for these artists.';
+    return;
+  }
+  status.textContent = '';
+  const total = Array.from(counts.values()).reduce((a, b) => a + b, 0);
+  const rows = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 10);
+  const max = Math.max(...rows.map(r => r[1]));
+  container.innerHTML = rows.map(([genre, n]) => `
+    <div class="bar-row">
+      <span class="bar-label" title="${escapeHtml(genre)}">${escapeHtml(genre)}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.max(n / max * 100, 2)}%"></div></div>
+      <span class="bar-count">${n} artist${n === 1 ? '' : 's'} · ${Math.round(n / total * 100)}%</span>
+    </div>`).join('');
 }
 
 /* ---------- Boot ---------- */

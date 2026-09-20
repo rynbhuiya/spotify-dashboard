@@ -435,3 +435,16 @@ footer {
   border-top: 1px solid var(--line);
 }
 .hidden { display: none !important; }
+
+/* ---------- 08 · Genres ---------- */
+.genre-bars .bar-row { grid-template-columns: 9.5rem 1fr 8rem; }
+.genre-bars .bar-label {
+  text-transform: capitalize;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 620px) {
+  .genre-bars .bar-row { grid-template-columns: 7rem 1fr; }
+  .genre-bars .bar-count { grid-column: 2; text-align: right; }
+}
